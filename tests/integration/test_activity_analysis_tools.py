@@ -396,9 +396,118 @@ async def test_get_activity_fit_messages_names_record_respiration_field(
     assert respiration["name"] == "enhanced_respiration_rate"
     assert respiration["value"] == 34.12
     assert respiration["units"] == "Breaths/min"
-    assert next(f for f in fields if f["definition_number"] == 144)["name"] == (
-        "unknown_144"
+    assert respiration["raw_name"] == "unknown_108"
+    assert respiration["alias_confidence"] == "fit_sdk"
+    strap = next(f for f in fields if f["definition_number"] == 144)
+    assert strap["name"] == "strap_heart_rate"
+    assert strap["raw_name"] == "unknown_144"
+    assert strap["alias_confidence"] == "confirmed"
+    assert strap["units"] == "bpm"
+
+
+def _make_creator_device_info(garmin_product=4536, software_version=24.13):
+    return _make_generic_fit_message(
+        "device_info",
+        [
+            (0, "device_index", "creator", None),
+            (4, "garmin_product", garmin_product, None),
+            (5, "software_version", software_version, None),
+        ],
     )
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_describes_field_aliases(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Aliases list their raw name, confidence, and the firmware checked."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    record = _make_generic_fit_message(
+        "record",
+        [
+            (144, "unknown_144", 151, None),
+            (143, "unknown_143", 87, None),
+            (90, "unknown_90", -3, None),
+            (134, "unknown_134", 100, None),
+        ],
+    )
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        [_make_creator_device_info(), record],
+        {
+            "message_types": ["record"],
+            "include_records": True,
+            "output_format": "compact",
+        },
+    )
+
+    data = json.loads(text)
+    # Candidates keep their raw name; unmapped fields stay unknown_<n>.
+    assert data["messages"][0]["fields"] == {
+        "strap_heart_rate": 151,
+        "body_battery": 87,
+        "unknown_90": -3,
+        "unknown_134": 100,
+    }
+    aliases = data["field_aliases"]
+    assert set(aliases) == {
+        "record.strap_heart_rate",
+        "record.body_battery",
+        "record.unknown_90",
+    }
+    assert aliases["record.strap_heart_rate"]["raw"] == "unknown_144"
+    assert aliases["record.strap_heart_rate"]["confidence"] == "confirmed"
+    assert aliases["record.strap_heart_rate"]["confirmed_on"] == [
+        {"garmin_product": 4536, "software_version": 24.13}
+    ]
+    assert aliases["record.strap_heart_rate"]["unconfirmed_firmware"] is False
+    assert aliases["record.unknown_90"]["confidence"] == "candidate"
+    assert aliases["record.unknown_90"]["candidate_name"] == "performance_condition"
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_flags_aliases_on_unconfirmed_firmware(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """A file from firmware the mapping was not checked on is flagged."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        [_make_creator_device_info(software_version=25.01)] + _make_run_records(),
+        {"message_types": ["record"], "include_records": True},
+    )
+
+    aliases = json.loads(text)["field_aliases"]
+    assert aliases["record.strap_heart_rate"]["unconfirmed_firmware"] is True
+    # FIT SDK profile fields do not depend on firmware.
+    assert aliases["record.enhanced_respiration_rate"]["confidence"] == "fit_sdk"
+    assert "unconfirmed_firmware" not in aliases["record.enhanced_respiration_rate"]
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_selects_fields_by_alias(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """fields accepts either the alias or the raw unknown_<n> name."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    for selector in ("strap_heart_rate", "unknown_144"):
+        text = await _call_fit_messages(
+            app_with_activity_analysis,
+            _make_run_records()[:1],
+            {
+                "message_types": ["record"],
+                "include_records": True,
+                "fields": [selector],
+                "output_format": "compact",
+            },
+        )
+        assert json.loads(text)["messages"][0]["fields"] == {
+            "timestamp": "2026-10-26T13:41:50",
+            "strap_heart_rate": 151,
+        }
 
 
 @pytest.mark.asyncio
@@ -423,20 +532,24 @@ async def test_get_activity_fit_messages_compact_selected_fields(
     data = json.loads(text)
     assert data["format"] == "compact"
     assert data["units"] == {
-        "record": {"heart_rate": "bpm", "enhanced_respiration_rate": "Breaths/min"}
+        "record": {
+            "heart_rate": "bpm",
+            "enhanced_respiration_rate": "Breaths/min",
+            "strap_heart_rate": "bpm",
+        }
     }
     assert [m["fields"] for m in data["messages"]] == [
         {
             "timestamp": "2026-10-26T13:41:50",
             "heart_rate": 151,
             "enhanced_respiration_rate": 34.12,
-            "unknown_144": 151,
+            "strap_heart_rate": 151,
         },
         {
             "timestamp": "2026-10-26T13:41:51",
             "heart_rate": 152,
             "enhanced_respiration_rate": 33.98,
-            "unknown_144": 152,
+            "strap_heart_rate": 152,
         },
         {"timestamp": "2026-10-26T13:41:52", "heart_rate": 152},
     ]
@@ -471,7 +584,7 @@ async def test_get_activity_fit_messages_columnar_pads_missing_values(
             ],
             "heart_rate": [151, 152, 152],
             "enhanced_respiration_rate": [34.12, 33.98, None],
-            "unknown_144": [151, 152, None],
+            "strap_heart_rate": [151, 152, None],
             "vertical_oscillation": [0.0, None, None],
         }
     }

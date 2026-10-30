@@ -182,24 +182,139 @@ _FIT_PROFILE_ADDITIONS = {
 }
 
 
-def _fit_profile_addition(field: Any, message: Any) -> Optional[tuple]:
-    """Return the newer-profile definition for a field fitparse left unknown."""
+# Undocumented Garmin fields identified by comparing live activities with
+# Garmin Connect, keyed like _FIT_PROFILE_ADDITIONS. Garmin can move
+# undocumented fields between firmware versions, so each mapping records the
+# creator devices (garmin_product, firmware) it was checked on. "confirmed" and
+# "likely" mappings rename the field; "candidate" mappings keep unknown_<n>
+# and are only reported as a candidate_name.
+_FENIX_8_FW_24_13 = {"garmin_product": 4536, "software_version": 24.13}
+_FIT_OBSERVED_FIELDS = {
+    ("record", 143): {
+        "name": "body_battery",
+        "confidence": "confirmed",
+        "evidence": (
+            "Last minus first sample equals Connect differenceBodyBattery on "
+            "four activities (2026-10-22 to 10-30: -23, -11, 0, -8)."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("record", 144): {
+        "name": "strap_heart_rate",
+        "units": "bpm",
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals heart_rate on 99% of samples with an HRM 600 (fw 5.2) "
+            "connected, and stops when the strap drops while wrist "
+            "heart_rate continues (2026-10-26)."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("session", 205): {
+        "name": "begin_potential_stamina",
+        "units": "percent",
+        "confidence": "confirmed",
+        "evidence": "Equals Connect beginPotentialStamina on four activities.",
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("session", 215): {
+        "name": "begin_body_battery",
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals the first record body_battery; end minus begin equals "
+            "Connect differenceBodyBattery on four activities."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("session", 216): {
+        "name": "end_body_battery",
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals the last record body_battery; end minus begin equals "
+            "Connect differenceBodyBattery on four activities."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("device_info", 32): {
+        "name": "battery_level",
+        "units": "percent",
+        "confidence": "likely",
+        "evidence": (
+            "HRM 600 values fall across runs (71, 59, 58) and read 93 when "
+            "battery_status is new."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("record", 90): {
+        "name": "performance_condition",
+        "confidence": "candidate",
+        "evidence": "Small signed values (-5 to 0), outdoor runs only.",
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("record", 136): {
+        "name": "wrist_heart_rate",
+        "confidence": "candidate",
+        "evidence": "Tracks heart_rate a few bpm apart; source unconfirmed.",
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("record", 137): {
+        "name": "stamina",
+        "confidence": "candidate",
+        "evidence": (
+            "First and last samples equal Connect begin/end potential "
+            "stamina; identical to unknown_138 on every run checked, so "
+            "potential and available stamina are not yet told apart."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("record", 138): {
+        "name": "stamina",
+        "confidence": "candidate",
+        "evidence": (
+            "First and last samples equal Connect begin/end potential "
+            "stamina; identical to unknown_137 on every run checked."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+}
+
+
+def _fit_field_spec(field: Any, message: Any) -> Optional[Dict[str, Any]]:
+    """Return the newer-profile or observed definition of an unknown field."""
     if message is None:
         return None
     name = getattr(field, "name", None)
     if name and not str(name).startswith("unknown"):
         return None
-    message_name = str(getattr(message, "name", None) or "").lower()
-    return _FIT_PROFILE_ADDITIONS.get(
-        (message_name, _fit_field_definition_number(field))
+    key = (
+        str(getattr(message, "name", None) or "").lower(),
+        _fit_field_definition_number(field),
     )
+    if key in _FIT_PROFILE_ADDITIONS:
+        name, scale, units = _FIT_PROFILE_ADDITIONS[key]
+        return {
+            "name": name,
+            "scale": scale,
+            "units": units,
+            "confidence": "fit_sdk",
+            "evidence": "Garmin FIT SDK profile.",
+        }
+    return _FIT_OBSERVED_FIELDS.get(key)
+
+
+def _fit_field_alias(field: Any, message: Any) -> Optional[Dict[str, Any]]:
+    """Return the spec of a field that is renamed rather than a candidate."""
+    spec = _fit_field_spec(field, message)
+    if spec is None or spec["confidence"] == "candidate":
+        return None
+    return spec
 
 
 def _fit_field_name(field: Any, message: Any = None) -> str:
     """Return a field's FIT name, naming newer-profile and unknown fields."""
-    addition = _fit_profile_addition(field, message)
-    if addition is not None:
-        return addition[0]
+    alias = _fit_field_alias(field, message)
+    if alias is not None:
+        return alias["name"]
     name = getattr(field, "name", None)
     if name:
         return str(name)
@@ -350,17 +465,30 @@ def _serialize_fit_field(field: Any, message: Any = None) -> Dict[str, Any]:
     definition_number = _fit_field_definition_number(field)
     value = getattr(field, "value", None)
     units = getattr(field, "units", None)
-    addition = _fit_profile_addition(field, message)
-    if addition is not None:
-        _, scale, units = addition
+    spec = _fit_field_spec(field, message)
+    alias = _fit_field_alias(field, message)
+    if alias is not None:
+        units = alias.get("units", units)
+        scale = alias.get("scale", 1)
         # fitparse leaves unknown fields unscaled.
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if (
+            scale != 1
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
             value = value / scale
 
     serialized: Dict[str, Any] = {
         "name": _fit_field_name(field, message),
         "value": _json_safe_fit_value(value),
     }
+    if spec is not None and definition_number is not None:
+        raw_name = f"unknown_{definition_number}"
+        if alias is not None:
+            serialized["raw_name"] = raw_name
+            serialized["alias_confidence"] = alias["confidence"]
+        else:
+            serialized["candidate_name"] = spec["name"]
 
     if units is not None:
         serialized["units"] = str(units)
@@ -493,6 +621,42 @@ def _columnar_fit_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     return columns
 
 
+def _fit_creator_device(fit_messages: List[Any]) -> Optional[Dict[str, Any]]:
+    """Return the recording device's product and firmware from device_info."""
+    for message in fit_messages:
+        if str(getattr(message, "name", None) or "") != "device_info":
+            continue
+        values = {
+            getattr(field, "name", None): getattr(field, "value", None)
+            for field in getattr(message, "fields", [])
+        }
+        if values.get("device_index") in ("creator", 0):
+            return {
+                "garmin_product": values.get("garmin_product"),
+                "software_version": values.get("software_version"),
+            }
+    return None
+
+
+def _describe_fit_field_alias(
+    spec: Dict[str, Any],
+    raw_name: str,
+    creator: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Describe one alias or candidate for the response's field_aliases."""
+    description: Dict[str, Any] = {
+        "raw": raw_name,
+        "confidence": spec["confidence"],
+        "evidence": spec["evidence"],
+    }
+    if spec["confidence"] == "candidate":
+        description["candidate_name"] = spec["name"]
+    if "confirmed_on" in spec:
+        description["confirmed_on"] = spec["confirmed_on"]
+        description["unconfirmed_firmware"] = creator not in spec["confirmed_on"]
+    return description
+
+
 def _parse_fit_messages(
     raw: bytes,
     *,
@@ -564,6 +728,8 @@ def _parse_fit_messages(
     fitfile = fitparse.FitFile(io.BytesIO(fit_bytes))
     fit_messages = list(fitfile.get_messages())
     message_counts: Dict[str, int] = {}
+    creator = _fit_creator_device(fit_messages)
+    field_aliases: Dict[str, Dict[str, Any]] = {}
 
     # Inventory without constructing JSON-shaped copies. Only the requested
     # page is serialized below.
@@ -624,11 +790,26 @@ def _parse_fit_messages(
             continue
 
         if message_offset <= eligible_index < page_end:
-            serialized_fields = [
-                _serialize_fit_field(field, message)
+            selected_message_fields = [
+                field
                 for field in getattr(message, "fields", [])
                 if field_is_selected(field, message)
             ]
+            serialized_fields = [
+                _serialize_fit_field(field, message)
+                for field in selected_message_fields
+            ]
+            for field, serialized_field in zip(
+                selected_message_fields, serialized_fields
+            ):
+                raw_name = serialized_field.get("raw_name")
+                if raw_name is None and "candidate_name" in serialized_field:
+                    raw_name = serialized_field["name"]
+                alias_key = f"{message_type}.{serialized_field['name']}"
+                if raw_name and alias_key not in field_aliases:
+                    field_aliases[alias_key] = _describe_fit_field_alias(
+                        _fit_field_spec(field, message), raw_name, creator
+                    )
             serialized_message: Dict[str, Any] = {
                 "message_index": message_index,
                 "type_index": type_index,
@@ -728,6 +909,8 @@ def _parse_fit_messages(
         result["columns"] = _columnar_fit_messages(messages)
     else:
         result["messages"] = messages
+    if field_aliases:
+        result["field_aliases"] = field_aliases
     if omitted_high_frequency_types:
         result["omitted_high_frequency_message_types"] = {
             message_type: {
@@ -1994,6 +2177,17 @@ def register_tools(app):
         per field for a whole run in a single page. Fields missing from
         fitparse's profile appear as unknown_<definition number>; record field
         108 is decoded as enhanced_respiration_rate (breaths/min).
+
+        Some undocumented Garmin fields are renamed from live comparison with
+        Garmin Connect: record strap_heart_rate (unknown_144, HR from a
+        chest strap only) and body_battery (unknown_143), session
+        begin/end_body_battery and begin_potential_stamina, and device_info
+        battery_level (likely). field_aliases lists each renamed or candidate
+        field in the response with its raw name, confidence (fit_sdk,
+        confirmed, likely, candidate), evidence, and the devices it was
+        checked on; unconfirmed_firmware=true means the file came from other
+        firmware, where Garmin may have moved the field. Candidates keep their
+        unknown_<n> name. fields accepts aliases and unknown_<n> names.
 
         every_n downsamples the record stream to every nth record, e.g.
         every_n=10 on a 1-second run keeps one sample per 10 records. Other
