@@ -214,7 +214,24 @@ _FIT_OBSERVED_FIELDS = {
         "name": "begin_potential_stamina",
         "units": "percent",
         "confidence": "confirmed",
-        "evidence": "Equals Connect beginPotentialStamina on four activities.",
+        "evidence": "Equals Connect beginPotentialStamina on six activities.",
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("session", 206): {
+        "name": "end_potential_stamina",
+        "units": "percent",
+        "confidence": "confirmed",
+        "evidence": "Equals Connect endPotentialStamina on six activities.",
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("session", 207): {
+        "name": "min_available_stamina",
+        "units": "percent",
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals Connect minAvailableStamina on six activities, including "
+            "2026-10-28 where it (67) differs from end potential (77)."
+        ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
     ("session", 215): {
@@ -258,21 +275,23 @@ _FIT_OBSERVED_FIELDS = {
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
     ("record", 137): {
-        "name": "stamina",
-        "confidence": "candidate",
+        "name": "potential_stamina",
+        "units": "percent",
+        "confidence": "confirmed",
         "evidence": (
-            "First and last samples equal Connect begin/end potential "
-            "stamina; identical to unknown_138 on every run checked, so "
-            "potential and available stamina are not yet told apart."
+            "Last sample equals Connect endPotentialStamina on six "
+            "activities, including 2026-10-28 (77) where available stamina "
+            "fell below it."
         ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
     ("record", 138): {
-        "name": "stamina",
-        "confidence": "candidate",
+        "name": "available_stamina",
+        "units": "percent",
+        "confidence": "confirmed",
         "evidence": (
-            "First and last samples equal Connect begin/end potential "
-            "stamina; identical to unknown_137 on every run checked."
+            "Minimum equals Connect minAvailableStamina on six activities, "
+            "including 2026-10-28 (67, while potential stamina ended at 77)."
         ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
@@ -2388,9 +2407,10 @@ def register_tools(app):
 
         Some undocumented Garmin fields are renamed from live comparison with
         Garmin Connect: record strap_heart_rate (unknown_144, HR from a
-        chest strap only) and body_battery (unknown_143), session
-        begin/end_body_battery and begin_potential_stamina, and device_info
-        battery_level (likely). field_aliases lists each renamed or candidate
+        chest strap only), body_battery (unknown_143), potential_stamina
+        (unknown_137) and available_stamina (unknown_138); session
+        begin/end_body_battery, begin/end_potential_stamina and
+        min_available_stamina; and device_info battery_level (likely). field_aliases lists each renamed or candidate
         field in the response with its raw name, confidence (fit_sdk,
         confirmed, likely, candidate), evidence, and the devices it was
         checked on; unconfirmed_firmware=true means the file came from other

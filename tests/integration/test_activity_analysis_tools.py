@@ -467,6 +467,46 @@ async def test_get_activity_fit_messages_describes_field_aliases(
 
 
 @pytest.mark.asyncio
+async def test_get_activity_fit_messages_names_stamina_fields(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Potential and available stamina, from a run where they diverge (10-28)."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    messages = [
+        _make_generic_fit_message(
+            "record", [(137, "unknown_137", 77, None), (138, "unknown_138", 67, None)]
+        ),
+        _make_generic_fit_message(
+            "session",
+            [
+                (205, "unknown_205", 100, None),
+                (206, "unknown_206", 77, None),
+                (207, "unknown_207", 67, None),
+            ],
+        ),
+    ]
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        messages,
+        {
+            "message_types": ["record", "session"],
+            "include_records": True,
+            "output_format": "compact",
+        },
+    )
+
+    assert [m["fields"] for m in json.loads(text)["messages"]] == [
+        {"potential_stamina": 77, "available_stamina": 67},
+        {
+            "begin_potential_stamina": 100,
+            "end_potential_stamina": 77,
+            "min_available_stamina": 67,
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_activity_fit_messages_flags_aliases_on_unconfirmed_firmware(
     app_with_activity_analysis, mock_garmin_client
 ):
