@@ -264,14 +264,23 @@ _FIT_OBSERVED_FIELDS = {
     },
     ("record", 90): {
         "name": "performance_condition",
-        "confidence": "candidate",
-        "evidence": "Small signed values (-5 to 0), outdoor runs only.",
+        "confidence": "confirmed",
+        "evidence": (
+            "Sample-for-sample identical distribution to Connect activity "
+            "details directPerformanceCondition on three activities "
+            "(2026-10-22, 10-28, 10-30); outdoor runs only."
+        ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
     ("record", 136): {
         "name": "wrist_heart_rate",
-        "confidence": "candidate",
-        "evidence": "Tracks heart_rate a few bpm apart; source unconfirmed.",
+        "units": "bpm",
+        "confidence": "likely",
+        "evidence": (
+            "Equals heart_rate on every sample without a strap (597 on "
+            "2026-10-26) and differs from strap heart_rate while one is "
+            "connected. Connect exposes no wrist-only series to confirm it."
+        ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
     ("record", 137): {
@@ -2408,7 +2417,8 @@ def register_tools(app):
         Some undocumented Garmin fields are renamed from live comparison with
         Garmin Connect: record strap_heart_rate (unknown_144, HR from a
         chest strap only), body_battery (unknown_143), potential_stamina
-        (unknown_137) and available_stamina (unknown_138); session
+        (unknown_137), available_stamina (unknown_138), performance_condition
+        (unknown_90), and wrist_heart_rate (unknown_136, likely); session
         begin/end_body_battery, begin/end_potential_stamina and
         min_available_stamina; and device_info battery_level (likely). field_aliases lists each renamed or candidate
         field in the response with its raw name, confidence (fit_sdk,

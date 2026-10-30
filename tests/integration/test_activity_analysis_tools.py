@@ -443,18 +443,18 @@ async def test_get_activity_fit_messages_describes_field_aliases(
     )
 
     data = json.loads(text)
-    # Candidates keep their raw name; unmapped fields stay unknown_<n>.
+    # Unmapped fields stay unknown_<n>.
     assert data["messages"][0]["fields"] == {
         "strap_heart_rate": 151,
         "body_battery": 87,
-        "unknown_90": -3,
+        "performance_condition": -3,
         "unknown_134": 100,
     }
     aliases = data["field_aliases"]
     assert set(aliases) == {
         "record.strap_heart_rate",
         "record.body_battery",
-        "record.unknown_90",
+        "record.performance_condition",
     }
     assert aliases["record.strap_heart_rate"]["raw"] == "unknown_144"
     assert aliases["record.strap_heart_rate"]["confidence"] == "confirmed"
@@ -462,8 +462,38 @@ async def test_get_activity_fit_messages_describes_field_aliases(
         {"garmin_product": 4536, "software_version": 24.13}
     ]
     assert aliases["record.strap_heart_rate"]["unconfirmed_firmware"] is False
-    assert aliases["record.unknown_90"]["confidence"] == "candidate"
-    assert aliases["record.unknown_90"]["candidate_name"] == "performance_condition"
+    assert aliases["record.performance_condition"]["raw"] == "unknown_90"
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_keeps_raw_name_for_candidates(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """A candidate mapping is reported but does not rename the field."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    candidate = {
+        "name": "mystery",
+        "confidence": "candidate",
+        "evidence": "Test.",
+        "confirmed_on": [{"garmin_product": 4536, "software_version": 24.13}],
+    }
+    record = _make_generic_fit_message("record", [(134, "unknown_134", 100, None)])
+
+    with patch.dict(
+        activity_analysis._FIT_OBSERVED_FIELDS, {("record", 134): candidate}
+    ):
+        text = await _call_fit_messages(
+            app_with_activity_analysis,
+            [_make_creator_device_info(), record],
+            {"message_types": ["record"], "include_records": True},
+        )
+
+    data = json.loads(text)
+    field = data["messages"][0]["fields"][0]
+    assert field["name"] == "unknown_134"
+    assert field["candidate_name"] == "mystery"
+    assert "raw_name" not in field
+    assert data["field_aliases"]["record.unknown_134"]["candidate_name"] == "mystery"
 
 
 @pytest.mark.asyncio
