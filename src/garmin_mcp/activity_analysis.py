@@ -471,13 +471,20 @@ def _estimated_message_chars(message: Dict[str, Any], output_format: str) -> int
 
 
 def _columnar_fit_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Pivot compact messages into per-type column arrays."""
+    """Pivot compact messages into per-type column arrays.
+
+    The message_index column is the message's position in the file; a FIT
+    message_index field (definition 254, e.g. on laps) is keyed
+    message_index@254 so the two cannot share a column.
+    """
     columns: Dict[str, Dict[str, List[Any]]] = {}
     for message in messages:
         table = columns.setdefault(message["type"], {"message_index": []})
         row_count = len(table["message_index"])
         table["message_index"].append(message["message_index"])
         for name, value in message["fields"].items():
+            if name == "message_index":
+                name = "message_index@254"
             column = table.setdefault(name, [None] * row_count)
             column.append(value)
         for column in table.values():

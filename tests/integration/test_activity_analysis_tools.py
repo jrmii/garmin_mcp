@@ -479,6 +479,33 @@ async def test_get_activity_fit_messages_columnar_pads_missing_values(
 
 
 @pytest.mark.asyncio
+async def test_get_activity_fit_messages_columnar_keeps_lap_message_index_field(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """A lap's FIT message_index field does not corrupt the position column."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    laps = [
+        _make_generic_fit_message(
+            "lap",
+            [(254, "message_index", index, None), (7, "total_elapsed_time", 60.0, "s")],
+        )
+        for index in range(2)
+    ]
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        [_make_generic_fit_message("session", [(5, "sport", "running", None)])] + laps,
+        {"message_types": ["lap"], "output_format": "columnar"},
+    )
+
+    assert json.loads(text)["columns"]["lap"] == {
+        "message_index": [1, 2],
+        "message_index@254": [0, 1],
+        "total_elapsed_time": [60.0, 60.0],
+    }
+
+
+@pytest.mark.asyncio
 async def test_get_activity_fit_messages_compact_keeps_duplicate_field_names(
     app_with_activity_analysis, mock_garmin_client
 ):
