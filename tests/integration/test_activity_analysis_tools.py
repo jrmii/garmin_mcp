@@ -602,6 +602,66 @@ async def test_get_activity_fit_messages_rejects_unknown_output_format(
 
 
 @pytest.mark.asyncio
+async def test_get_activity_fit_messages_every_n_downsamples_records_only(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """every_n keeps every nth record; other message types are untouched."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    messages = [
+        _make_generic_fit_message("record", [(3, "heart_rate", 100 + i, "bpm")])
+        for i in range(7)
+    ]
+    messages.insert(3, _make_generic_fit_message("lap", [(7, "total_elapsed_time", 60.0, "s")]))
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        messages,
+        {
+            "message_types": ["record", "lap"],
+            "include_records": True,
+            "every_n": 3,
+            "message_limit": 2,
+            "output_format": "columnar",
+        },
+    )
+
+    data = json.loads(text)
+    # Records 0, 3 and 6 survive the stride, plus the lap: four eligible.
+    assert data["pagination"]["total_eligible_count"] == 4
+    assert data["pagination"]["next_offset"] == 2
+    assert data["columns"]["record"]["heart_rate"] == [100]
+    assert data["columns"]["lap"]["message_index"] == [3]  # file position
+    assert data["record_stream"]["every_n"] == 3
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        messages,
+        {
+            "message_types": ["record"],
+            "include_records": True,
+            "every_n": 3,
+            "message_offset": 1,
+            "output_format": "columnar",
+        },
+    )
+    assert json.loads(text)["columns"]["record"]["heart_rate"] == [103, 106]
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_rejects_out_of_range_every_n(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """every_n must be at least 1."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis, _make_run_records(), {"every_n": 0}
+    )
+
+    assert json.loads(text)["error"] == "every_n must be between 1 and 3600"
+
+
+@pytest.mark.asyncio
 async def test_get_activity_fit_messages_omits_other_high_frequency_types_by_default(
     app_with_activity_analysis, mock_garmin_client
 ):

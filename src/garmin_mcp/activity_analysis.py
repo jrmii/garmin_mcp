@@ -503,6 +503,7 @@ def _parse_fit_messages(
     fields: Optional[List[str]] = None,
     output_format: FitMessagesFormat = "verbose",
     max_response_chars: int = FIT_MESSAGES_MAX_RESPONSE_CHARS,
+    every_n: int = 1,
 ) -> Dict[str, Any]:
     """Parse all FIT messages/fields with safe high-frequency pagination.
 
@@ -517,11 +518,16 @@ def _parse_fit_messages(
     fields keeps only the named fields (plus timestamp) in each message.
     "compact" returns each message's fields as {name: value} without nulls or
     decoder metadata; "columnar" also pivots them into per-type arrays.
+
+    every_n keeps every nth record message (the first, then every nth after
+    it); other message types are never downsampled.
     """
     if message_offset < 0:
         raise ValueError("message_offset must be at least 0")
     if not 1 <= message_limit <= 5000:
         raise ValueError("message_limit must be between 1 and 5000")
+    if not 1 <= every_n <= 3600:
+        raise ValueError("every_n must be between 1 and 3600")
     if output_format not in ("verbose", "compact", "columnar"):
         raise ValueError(
             'output_format must be "verbose", "compact", or "columnar"'
@@ -586,8 +592,16 @@ def _parse_fit_messages(
             return False
         return message_type not in omitted_high_frequency_types
 
+    def eligible_count(message_type: str, count: int) -> int:
+        if message_type.lower() == "record":
+            return -(-count // every_n)
+        return count
+
+    def is_strided_out(message_type: str, type_index: int) -> bool:
+        return message_type.lower() == "record" and type_index % every_n != 0
+
     total_eligible_count = sum(
-        count
+        eligible_count(message_type, count)
         for message_type, count in message_counts.items()
         if message_type_is_eligible(message_type)
     )
@@ -604,7 +618,9 @@ def _parse_fit_messages(
         message_type = str(getattr(message, "name", None) or "unknown")
         type_index = seen_type_counts.get(message_type, 0)
         seen_type_counts[message_type] = type_index + 1
-        if not message_type_is_eligible(message_type):
+        if not message_type_is_eligible(message_type) or is_strided_out(
+            message_type, type_index
+        ):
             continue
 
         if message_offset <= eligible_index < page_end:
@@ -670,6 +686,8 @@ def _parse_fit_messages(
         "total_count": record_count,
         "returned_count": returned_record_count,
     }
+    if every_n > 1:
+        record_stream["every_n"] = every_n
     if not include_records and records_selected and record_count:
         record_stream["hint"] = (
             "Set include_records=true and use message pagination to retrieve records."
@@ -1943,6 +1961,7 @@ def register_tools(app):
         message_limit: int = 1000,
         fields: Optional[List[str]] = None,
         output_format: FitMessagesFormat = "verbose",
+        every_n: int = 1,
     ) -> str:
         """Retrieve and generically parse an activity's original FIT file.
 
@@ -1976,6 +1995,11 @@ def register_tools(app):
         fitparse's profile appear as unknown_<definition number>; record field
         108 is decoded as enhanced_respiration_rate (breaths/min).
 
+        every_n downsamples the record stream to every nth record, e.g.
+        every_n=10 on a 1-second run keeps one sample per 10 records. Other
+        message types are never downsampled; pagination counts the
+        downsampled stream.
+
         Every response stays under about 1,000,000 characters. A page that
         would exceed it ends early with pagination.truncated_by_size=true and
         next_offset.
@@ -1993,6 +2017,7 @@ def register_tools(app):
                            metadata), "compact" ({name: value}, nulls dropped,
                            units listed once), or "columnar" (compact values
                            as per-type arrays under "columns").
+            every_n: Keep every nth record message, 1-3600 (default 1, all).
         """
         if not FITPARSE_AVAILABLE:
             return (
@@ -2024,6 +2049,7 @@ def register_tools(app):
                         fields=fields,
                         output_format=output_format,
                         max_response_chars=size_budget,
+                        every_n=every_n,
                     )
                     result = {
                         "activity_id": activity_id,
