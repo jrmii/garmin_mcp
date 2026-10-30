@@ -405,15 +405,15 @@ async def test_get_activity_fit_messages_names_record_respiration_field(
     assert strap["units"] == "bpm"
 
 
-def _make_creator_device_info(garmin_product=4536, software_version=24.13):
-    return _make_generic_fit_message(
-        "device_info",
-        [
-            (0, "device_index", "creator", None),
-            (4, "garmin_product", garmin_product, None),
-            (5, "software_version", software_version, None),
-        ],
-    )
+def _make_creator_device_info(garmin_product=4536, software_version=24.13, ts=None):
+    fields = [
+        (0, "device_index", "creator", None),
+        (4, "garmin_product", garmin_product, None),
+        (5, "software_version", software_version, None),
+    ]
+    if ts is not None:
+        fields.append((253, "timestamp", datetime.datetime.fromisoformat(ts), None))
+    return _make_generic_fit_message("device_info", fields)
 
 
 @pytest.mark.asyncio
@@ -772,6 +772,85 @@ async def test_get_activity_fit_messages_rejects_out_of_range_every_n(
     )
 
     assert json.loads(text)["error"] == "every_n must be between 1 and 3600"
+
+
+def _make_sensor_device_info(ts, index, source, serial, kind=None, battery=None):
+    """device_info shaped like the HRM 600 announcements on 2026-10-26."""
+    fields = [
+        (253, "timestamp", datetime.datetime.fromisoformat(ts), None),
+        (0, "device_index", index, None),
+        (25, "source_type", source, None),
+        (3, "serial_number", serial, None),
+    ]
+    if source == "antplus":
+        fields.append((21, "antplus_device_type", kind, None))
+    else:
+        fields += [
+            (1, "device_type", 1, None),
+            (4, "garmin_product", 4607, None),
+            (5, "software_version", 5.2, None),
+            (11, "battery_status", "good", None),
+            (32, "unknown_32", battery, None),
+        ]
+    return _make_generic_fit_message("device_info", fields)
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_device_summary_counts_reconnects(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """One row per serial/source/type, reconnects counted, duplicates noted."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    messages = [
+        _make_creator_device_info(ts="2026-10-26T13:11:43"),
+        _make_sensor_device_info("2026-10-26T13:11:43", 2, "antplus", 83951642, "heart_rate"),
+        _make_sensor_device_info("2026-10-26T13:12:02", 2, "bluetooth_low_energy", 3611680303, battery=59),
+        _make_sensor_device_info("2026-10-26T13:12:03", 9, "bluetooth_low_energy", 83951642, battery=59),
+        _make_sensor_device_info("2026-10-26T13:27:23", 2, "antplus", None, "heart_rate"),
+        _make_sensor_device_info("2026-10-26T13:27:28", 2, "bluetooth_low_energy", 3611680303, battery=58),
+        *_make_run_records(),
+        _make_creator_device_info(ts="2026-10-26T13:50:50"),
+        _make_sensor_device_info("2026-10-26T13:50:50", 9, "bluetooth_low_energy", 83951642, battery=58),
+    ]
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis, messages, {"output_format": "device_summary"}
+    )
+
+    data = json.loads(text)
+    assert "messages" not in data and "pagination" not in data
+    sensors = {
+        (s["serial_number"], s["source_type"]): s for s in data["sensors"]
+    }
+    assert set(sensors) == {
+        (83951642, "antplus"),
+        (3611680303, "bluetooth_low_energy"),
+        (83951642, "bluetooth_low_energy"),
+    }
+    ant = sensors[(83951642, "antplus")]
+    # The serial-less announcement inherits the channel's serial.
+    assert ant["connects"] == 2 and ant["reconnects"] == 1
+    assert ant["present_at_end"] is False
+    strap = sensors[(3611680303, "bluetooth_low_energy")]
+    assert strap["product_name"] == "HRM 600"
+    assert strap["reconnects"] == 1
+    assert strap["battery_level_first"] == 59
+    assert strap["battery_level_last"] == 58
+    # The closing burst is not a connect.
+    secondary = sensors[(83951642, "bluetooth_low_energy")]
+    assert secondary["connects"] == 1 and secondary["present_at_end"] is True
+    assert data["creator"]["product_name"] == "fenix 8"
+    assert data["heart_rate"] == {
+        "records": 3,
+        "heart_rate_samples": 3,
+        "strap_heart_rate_samples": 2,
+        "strap_matches_heart_rate": 2,
+        "strap_first_elapsed_s": 0,
+        "strap_last_elapsed_s": 1,
+    }
+    assert any("Serial 83951642 reports on 2 channels" in n for n in data["notes"])
+    assert any("HRM 600 reports 2 serial numbers" in n for n in data["notes"])
+    assert data["field_aliases"]["device_info.battery_level"]["confidence"] == "likely"
 
 
 @pytest.mark.asyncio
