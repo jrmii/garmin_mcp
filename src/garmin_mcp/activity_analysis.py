@@ -203,6 +203,8 @@ _FIT_PROFILE_ADDITIONS = {
 # behaves. Both rename the field. "candidate" mappings keep unknown_<n> and
 # are only reported as a candidate_name.
 _FENIX_8_FW_24_13 = {"garmin_product": 4536, "software_version": 24.13}
+_FENIX_8_FW_24_14 = {"garmin_product": 4536, "software_version": 24.14}  # beta
+_FENIX_8_BOTH = [_FENIX_8_FW_24_13, _FENIX_8_FW_24_14]
 
 def _details_match(
     name: str,
@@ -210,6 +212,7 @@ def _details_match(
     units: Optional[str],
     activities: str,
     scale: int = 1,
+    confirmed_on: Optional[List[dict]] = None,
 ) -> dict:
     """Spec for a record field equal to a Connect activity details series."""
     spec = {
@@ -219,7 +222,7 @@ def _details_match(
             f"Equals Connect activity details {key} at every timestamp on "
             f"{activities}."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": confirmed_on or [_FENIX_8_FW_24_13],
     }
     if units is not None:
         spec["units"] = units
@@ -232,6 +235,12 @@ def _details_match(
 _ALL_FOUR = "four activities (2026-10-26, 10-28, 10-30, 10-31)"
 _OUTDOOR_THREE = "three outdoor runs (2026-10-28, 10-30, 10-31)"
 _THREE_WITH_STEP_SPEED_LOSS = "three runs (2026-10-26, 10-30, 10-31)"
+_ALL_FOUR_AND_TREADMILL = (
+    _ALL_FOUR + " on fw 24.13 and a treadmill run on fw 24.14 (2026-11-01)"
+)
+_ALL_FOUR_AND_ALL_THREE = (
+    _ALL_FOUR + " on fw 24.13 and three activities on fw 24.14 (2026-11-01)"
+)
 
 
 _FIT_OBSERVED_FIELDS = {
@@ -242,10 +251,18 @@ _FIT_OBSERVED_FIELDS = {
         _OUTDOOR_THREE,
     ),
     ("record", 137): _details_match(
-        "potential_stamina", "directPotentialStamina", "percent", _ALL_FOUR
+        "potential_stamina",
+        "directPotentialStamina",
+        "percent",
+        _ALL_FOUR_AND_TREADMILL,
+        confirmed_on=_FENIX_8_BOTH,
     ),
     ("record", 138): _details_match(
-        "available_stamina", "directAvailableStamina", "percent", _ALL_FOUR
+        "available_stamina",
+        "directAvailableStamina",
+        "percent",
+        _ALL_FOUR_AND_TREADMILL,
+        confirmed_on=_FENIX_8_BOTH,
     ),
     ("record", 140): _details_match(
         "grade_adjusted_speed",
@@ -255,7 +272,11 @@ _FIT_OBSERVED_FIELDS = {
         scale=1000,
     ),
     ("record", 143): _details_match(
-        "body_battery", "directBodyBattery", "percent", _ALL_FOUR
+        "body_battery",
+        "directBodyBattery",
+        "percent",
+        _ALL_FOUR_AND_ALL_THREE,
+        confirmed_on=_FENIX_8_BOTH,
     ),
     ("record", 146): _details_match(
         "step_speed_loss",
@@ -274,50 +295,53 @@ _FIT_OBSERVED_FIELDS = {
     ("record", 136): {
         "name": "wrist_heart_rate",
         "units": "bpm",
-        "confidence": "likely",
+        "confidence": "confirmed",
         "evidence": (
             "Equals heart_rate on every sample recorded without a strap "
-            "(3,121 on 2026-10-28, 597 on 10-26) and differs from strap "
-            "heart_rate while one is connected. Connect exposes no "
-            "wrist-only series."
+            "(3,121 on 2026-10-28, 597 on 10-26, 305 on an 11-01 test with "
+            "no strap nearby), is absent on an 11-01 test with wrist heart "
+            "rate turned off, and differs from strap heart_rate while both "
+            "are on."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("record", 144): {
         "name": "strap_heart_rate",
         "units": "bpm",
-        "confidence": "likely",
+        "confidence": "confirmed",
         "evidence": (
-            "Equals heart_rate on 99% of samples with an HRM 600 (fw 5.2) "
-            "connected, stops when the strap drops while wrist heart_rate "
-            "continues (2026-10-26), and is absent without a strap "
-            "(2026-10-28). Connect exposes no strap-only series."
+            "Equals heart_rate on every sample of an 11-01 test with wrist "
+            "heart rate turned off and an HRM 600 (fw 5.2) on, and on 99% "
+            "of samples with both on. Stops when the strap drops while "
+            "wrist_heart_rate continues (2026-10-26) and is absent without "
+            "a strap (10-28, 11-01)."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     # Message 140 is not in the FIT SDK; a Garmin forum post describes it as
     # Firstbeat post-activity metrics. Matched against the Connect summary
-    # on five activities (2026-10-22 to 10-31).
+    # on five activities on fw 24.13 (2026-10-22 to 10-31) and three on fw
+    # 24.14 (11-01).
     ("unknown_140", 37): {
         "name": "training_load",
         "scale": 65536,
         "confidence": "confirmed",
         "evidence": (
-            "Equals Connect activityTrainingLoad on five activities "
-            "(2026-10-22 to 10-31, 84.7 to 220.5)."
+            "Equals Connect activityTrainingLoad on eight activities "
+            "(2026-10-22 to 11-01, 0.13 to 220.5)."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("unknown_140", 3): {
         "name": "aerobic_training_load",
         "scale": 65536,
         "confidence": "likely",
         "evidence": (
-            "Adds with unknown_38 to training_load on five activities; "
+            "Adds with unknown_38 to training_load on eight activities; "
             "equals it when anaerobic training effect is 0. Connect has no "
             "per-activity split to confirm it."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("unknown_140", 38): {
         "name": "anaerobic_training_load",
@@ -327,14 +351,14 @@ _FIT_OBSERVED_FIELDS = {
             "Adds with unknown_3 to training_load; nonzero (32.2) only on "
             "2026-10-28, the one run with anaerobic training effect."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("unknown_140", 4): {
         "name": "aerobic_training_effect",
         "scale": 10,
         "confidence": "confirmed",
-        "evidence": "Equals Connect trainingEffect on five activities.",
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "evidence": "Equals Connect trainingEffect on eight activities.",
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("unknown_140", 17): {
         "name": "final_performance_condition",
@@ -350,10 +374,10 @@ _FIT_OBSERVED_FIELDS = {
         "scale": 10,
         "confidence": "confirmed",
         "evidence": (
-            "Equals Connect anaerobicTrainingEffect on five activities, "
+            "Equals Connect anaerobicTrainingEffect on eight activities, "
             "including 2.1 on 2026-10-28."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("unknown_140", 7): {
         "name": "vo2max",
@@ -368,43 +392,44 @@ _FIT_OBSERVED_FIELDS = {
         "name": "begin_potential_stamina",
         "units": "percent",
         "confidence": "confirmed",
-        "evidence": "Equals Connect beginPotentialStamina on six activities.",
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "evidence": "Equals Connect beginPotentialStamina on seven activities.",
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("session", 206): {
         "name": "end_potential_stamina",
         "units": "percent",
         "confidence": "confirmed",
-        "evidence": "Equals Connect endPotentialStamina on six activities.",
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "evidence": "Equals Connect endPotentialStamina on seven activities.",
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("session", 207): {
         "name": "min_available_stamina",
         "units": "percent",
         "confidence": "confirmed",
         "evidence": (
-            "Equals Connect minAvailableStamina on six activities, including "
-            "2026-10-28 where it (67) differs from end potential (77)."
+            "Equals Connect minAvailableStamina on seven activities, "
+            "including 2026-10-28 where it (67) differs from end potential "
+            "(77)."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("session", 215): {
         "name": "begin_body_battery",
         "confidence": "confirmed",
         "evidence": (
             "Equals the first record body_battery; end minus begin equals "
-            "Connect differenceBodyBattery on four activities."
+            "Connect differenceBodyBattery on seven activities."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
     ("session", 216): {
         "name": "end_body_battery",
         "confidence": "confirmed",
         "evidence": (
             "Equals the last record body_battery; end minus begin equals "
-            "Connect differenceBodyBattery on four activities."
+            "Connect differenceBodyBattery on seven activities."
         ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
+        "confirmed_on": _FENIX_8_BOTH,
     },
 }
 
@@ -793,7 +818,39 @@ def _describe_fit_field_alias(
 
 # Garmin products seen on the account this summary was built against; others
 # are reported by number only.
-_GARMIN_PRODUCT_NAMES = {4536: "fenix 8", 4607: "HRM 600"}
+_GARMIN_PRODUCT_NAMES = {1570: "tempe", 4536: "fenix 8", 4607: "HRM 600"}
+
+# With wrist heart rate off, a fenix 8 rewrote the strap's device_info every
+# 1 to 3 seconds; announcements this close together are one connection.
+_FIT_SENSOR_STREAM_GAP_S = 3
+
+
+def _fit_sensor_serial(values: Dict[str, Any]) -> Any:
+    """Return a device_info serial number, or None if it is a placeholder.
+
+    The same per-second stream gave the strap serials with only the top
+    three bits set (0x20000000 to 0xE0000000) between real ones.
+    """
+    serial = values.get("serial_number")
+    if isinstance(serial, int) and serial & 0x1FFFFFFF == 0:
+        return None
+    return serial
+
+
+def _count_fit_connects(timestamps: List[Any]) -> int:
+    """Count runs of announcements more than a stream gap apart."""
+    connects = 0
+    previous = None
+    for timestamp in timestamps:
+        if (
+            previous is None
+            or not isinstance(timestamp, datetime.datetime)
+            or not isinstance(previous, datetime.datetime)
+            or (timestamp - previous).total_seconds() > _FIT_SENSOR_STREAM_GAP_S
+        ):
+            connects += 1
+        previous = timestamp
+    return connects
 
 
 def _fit_message_values(message: Any) -> Dict[str, Any]:
@@ -844,7 +901,8 @@ def _summarize_fit_devices(
     A row is one serial number on one source (ANT+, BLE) as one sensor type.
     The watch writes device_info for every sensor at the start and end of an
     activity and again whenever a sensor connects, so a sensor's connects are
-    its distinct device_info timestamps outside the closing burst. Rows are
+    its distinct device_info timestamps outside the closing burst, with
+    announcements a few seconds apart counted once. Rows are
     not merged: a strap that reports over several channels or serials shows
     as several rows, with a note.
     """
@@ -879,14 +937,14 @@ def _summarize_fit_devices(
             values.get("source_type"),
             sensor_type(values),
         )
-        if values.get("serial_number") is not None:
-            serial_by_channel.setdefault(channel, values["serial_number"])
+        if _fit_sensor_serial(values) is not None:
+            serial_by_channel.setdefault(channel, _fit_sensor_serial(values))
 
     rows: Dict[tuple, Dict[str, Any]] = {}
     for values in external:
         kind = sensor_type(values)
         source = values.get("source_type")
-        serial = values.get("serial_number")
+        serial = _fit_sensor_serial(values)
         if serial is None:
             serial = serial_by_channel.get(
                 (values.get("device_index"), source, kind)
@@ -922,8 +980,8 @@ def _summarize_fit_devices(
         connects = [t for t in timestamps if t != end_timestamp]
         row["first_seen"] = _json_safe_fit_value(timestamps[0])
         row["last_seen"] = _json_safe_fit_value(timestamps[-1])
-        row["connects"] = len(connects)
-        row["reconnects"] = max(len(connects) - 1, 0)
+        row["connects"] = _count_fit_connects(connects)
+        row["reconnects"] = max(row["connects"] - 1, 0)
         if end_timestamp is not None:
             row["present_at_end"] = end_timestamp in timestamps
         for name in ("battery_status", "battery_level"):
@@ -2521,9 +2579,9 @@ def register_tools(app):
         Garmin fields are renamed from live comparison with Garmin Connect.
         Record: performance_condition (unknown_90), potential_stamina (137),
         available_stamina (138), grade_adjusted_speed (140), body_battery
-        (143), step_speed_loss (146), step_speed_loss_percent (147), and,
-        as likely, wrist_heart_rate (136) and strap_heart_rate (144, HR from
-        a chest strap only). Session: begin/end_body_battery,
+        (143), step_speed_loss (146), step_speed_loss_percent (147),
+        wrist_heart_rate (136), and strap_heart_rate (144, HR from a chest
+        strap only). Session: begin/end_body_battery,
         begin/end_potential_stamina and min_available_stamina. Message
         unknown_140 (Firstbeat metrics): training_load, its likely
         aerobic/anaerobic_training_load split, aerobic_training_effect,
@@ -2543,7 +2601,8 @@ def register_tools(app):
         output_format="device_summary" replaces the messages with a sensor
         health check built from device_info and the record stream: one row
         per sensor serial, source (ANT+ or BLE), and sensor type, with
-        product, firmware, battery, connects/reconnects, and whether it was
+        product, firmware, battery, connects/reconnects (announcements a
+        few seconds apart count once), and whether it was
         still connected at the end, plus heart_rate vs strap_heart_rate
         coverage. Rows are not merged; notes call out one serial on several
         channels or one product under several serials.

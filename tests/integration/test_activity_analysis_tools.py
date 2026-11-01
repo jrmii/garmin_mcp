@@ -401,7 +401,7 @@ async def test_get_activity_fit_messages_names_record_respiration_field(
     strap = next(f for f in fields if f["definition_number"] == 144)
     assert strap["name"] == "strap_heart_rate"
     assert strap["raw_name"] == "unknown_144"
-    assert strap["alias_confidence"] == "likely"
+    assert strap["alias_confidence"] == "confirmed"
     assert strap["units"] == "bpm"
 
 
@@ -457,9 +457,10 @@ async def test_get_activity_fit_messages_describes_field_aliases(
         "record.performance_condition",
     }
     assert aliases["record.strap_heart_rate"]["raw"] == "unknown_144"
-    assert aliases["record.strap_heart_rate"]["confidence"] == "likely"
+    assert aliases["record.strap_heart_rate"]["confidence"] == "confirmed"
     assert aliases["record.strap_heart_rate"]["confirmed_on"] == [
-        {"garmin_product": 4536, "software_version": 24.13}
+        {"garmin_product": 4536, "software_version": 24.13},
+        {"garmin_product": 4536, "software_version": 24.14},
     ]
     assert aliases["record.strap_heart_rate"]["unconfirmed_firmware"] is False
     assert aliases["record.performance_condition"]["raw"] == "unknown_90"
@@ -1009,6 +1010,38 @@ async def test_get_activity_fit_messages_device_summary_counts_reconnects(
     assert any("Serial 83951642 reports on 2 channels" in n for n in data["notes"])
     assert any("HRM 600 reports 2 serial numbers" in n for n in data["notes"])
     assert data["field_aliases"]["device_info.battery_level"]["confidence"] == "fit_sdk"
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_device_summary_merges_sensor_streams(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Per-second announcements are one connect; placeholder serials inherit."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    # Shaped like 2026-11-01 with wrist heart rate off (fenix 8 fw 24.14).
+    messages = [
+        _make_creator_device_info(software_version=24.14, ts="2026-11-01T17:23:58"),
+        _make_sensor_device_info("2026-11-01T17:23:58", 4, "bluetooth_low_energy", 3611680303, battery=79),
+        _make_sensor_device_info("2026-11-01T17:23:59", 4, "bluetooth_low_energy", 3611680303, battery=79),
+        _make_sensor_device_info("2026-11-01T17:24:02", 4, "bluetooth_low_energy", 0x40000000, battery=79),
+        _make_sensor_device_info("2026-11-01T17:24:03", 4, "bluetooth_low_energy", 3611680303, battery=79),
+        _make_sensor_device_info("2026-11-01T17:26:00", 4, "bluetooth_low_energy", 0xE0000000, battery=79),
+        _make_creator_device_info(software_version=24.14, ts="2026-11-01T17:28:59"),
+        _make_sensor_device_info("2026-11-01T17:28:59", 4, "bluetooth_low_energy", 3611680303, battery=79),
+    ]
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis, messages, {"output_format": "device_summary"}
+    )
+
+    data = json.loads(text)
+    assert len(data["sensors"]) == 1
+    strap = data["sensors"][0]
+    assert strap["serial_number"] == 3611680303
+    # 17:23:58 to 17:24:03 is one stream; 17:26:00 is a second connect.
+    assert strap["connects"] == 2 and strap["reconnects"] == 1
+    assert strap["present_at_end"] is True
+    assert "notes" not in data
 
 
 @pytest.mark.asyncio
