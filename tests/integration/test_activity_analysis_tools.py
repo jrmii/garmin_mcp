@@ -401,7 +401,7 @@ async def test_get_activity_fit_messages_names_record_respiration_field(
     strap = next(f for f in fields if f["definition_number"] == 144)
     assert strap["name"] == "strap_heart_rate"
     assert strap["raw_name"] == "unknown_144"
-    assert strap["alias_confidence"] == "confirmed"
+    assert strap["alias_confidence"] == "likely"
     assert strap["units"] == "bpm"
 
 
@@ -457,7 +457,7 @@ async def test_get_activity_fit_messages_describes_field_aliases(
         "record.performance_condition",
     }
     assert aliases["record.strap_heart_rate"]["raw"] == "unknown_144"
-    assert aliases["record.strap_heart_rate"]["confidence"] == "confirmed"
+    assert aliases["record.strap_heart_rate"]["confidence"] == "likely"
     assert aliases["record.strap_heart_rate"]["confirmed_on"] == [
         {"garmin_product": 4536, "software_version": 24.13}
     ]
@@ -534,6 +534,55 @@ async def test_get_activity_fit_messages_names_stamina_fields(
             "min_available_stamina": 67,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_activity_fit_messages_scales_observed_and_sdk_fields(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Raw values from 2026-10-30 decode to Connect's activity-details units."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    messages = [
+        _make_generic_fit_message(
+            "record",
+            [
+                (140, "unknown_140", 2441, None),
+                (146, "unknown_146", 2358, None),
+                (147, "unknown_147", 966, None),
+            ],
+        ),
+        _make_generic_fit_message(
+            "session",
+            [
+                (169, "unknown_169", 3493, None),
+                (211, "unknown_211", 2381, None),
+            ],
+        ),
+    ]
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        messages,
+        {
+            "message_types": ["record", "session"],
+            "include_records": True,
+            "output_format": "compact",
+        },
+    )
+
+    data = json.loads(text)
+    assert [m["fields"] for m in data["messages"]] == [
+        {
+            "grade_adjusted_speed": 2.441,
+            "step_speed_loss": 0.2358,
+            "step_speed_loss_percent": 9.66,
+        },
+        {"enhanced_avg_respiration_rate": 34.93, "avg_grade_adjusted_speed": 2.381},
+    ]
+    assert data["units"]["record"]["grade_adjusted_speed"] == "m/s"
+    assert data["field_aliases"]["session.avg_grade_adjusted_speed"]["confidence"] == (
+        "fit_sdk"
+    )
 
 
 @pytest.mark.asyncio
@@ -920,7 +969,7 @@ async def test_get_activity_fit_messages_device_summary_counts_reconnects(
     }
     assert any("Serial 83951642 reports on 2 channels" in n for n in data["notes"])
     assert any("HRM 600 reports 2 serial numbers" in n for n in data["notes"])
-    assert data["field_aliases"]["device_info.battery_level"]["confidence"] == "likely"
+    assert data["field_aliases"]["device_info.battery_level"]["confidence"] == "fit_sdk"
 
 
 @pytest.mark.asyncio

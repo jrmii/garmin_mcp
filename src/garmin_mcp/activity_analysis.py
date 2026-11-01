@@ -177,36 +177,121 @@ def _fit_field_definition_number(field: Any) -> Optional[int]:
 
 # Garmin FIT SDK profile fields that fitparse 1.2.0's bundled profile predates,
 # keyed by (message name, field definition number): (name, scale, units).
+# Checked against the garmin-fit-sdk 21.218 profile.
 _FIT_PROFILE_ADDITIONS = {
     ("record", 108): ("enhanced_respiration_rate", 100, "Breaths/min"),
+    ("device_info", 32): ("battery_level", 1, "%"),
+    ("session", 38): ("end_position_lat", 1, "semicircles"),
+    ("session", 39): ("end_position_long", 1, "semicircles"),
+    ("session", 110): ("sport_profile_name", 1, None),
+    ("session", 168): ("training_load_peak", 65536, None),
+    ("session", 169): ("enhanced_avg_respiration_rate", 100, "Breaths/min"),
+    ("session", 170): ("enhanced_max_respiration_rate", 100, "Breaths/min"),
+    ("session", 180): ("enhanced_min_respiration_rate", 100, "Breaths/min"),
+    ("session", 192): ("workout_feel", 1, None),
+    ("session", 193): ("workout_rpe", 1, None),
+    ("session", 196): ("metabolic_calories", 1, "kcal"),
+    ("session", 211): ("avg_grade_adjusted_speed", 1000, "m/s"),
 }
 
 
 # Undocumented Garmin fields identified by comparing live activities with
 # Garmin Connect, keyed like _FIT_PROFILE_ADDITIONS. Garmin can move
 # undocumented fields between firmware versions, so each mapping records the
-# creator devices (garmin_product, firmware) it was checked on. "confirmed" and
-# "likely" mappings rename the field; "candidate" mappings keep unknown_<n>
-# and are only reported as a candidate_name.
+# creator devices (garmin_product, firmware) it was checked on. "confirmed"
+# mappings match a Garmin Connect value; "likely" ones rest on how the field
+# behaves. Both rename the field. "candidate" mappings keep unknown_<n> and
+# are only reported as a candidate_name.
 _FENIX_8_FW_24_13 = {"garmin_product": 4536, "software_version": 24.13}
-_FIT_OBSERVED_FIELDS = {
-    ("record", 143): {
-        "name": "body_battery",
+
+def _details_match(
+    name: str,
+    key: str,
+    units: Optional[str],
+    activities: str,
+    scale: int = 1,
+) -> dict:
+    """Spec for a record field equal to a Connect activity details series."""
+    spec = {
+        "name": name,
         "confidence": "confirmed",
         "evidence": (
-            "Last minus first sample equals Connect differenceBodyBattery on "
-            "four activities (2026-10-22 to 10-30: -23, -11, 0, -8)."
+            f"Equals Connect activity details {key} at every timestamp on "
+            f"{activities}."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    }
+    if units is not None:
+        spec["units"] = units
+    if scale != 1:
+        spec["scale"] = scale
+    return spec
+
+
+# Activities the timestamp-aligned checks ran on (get_activity_details).
+_ALL_FOUR = "four activities (2026-10-26, 10-28, 10-30, 10-31)"
+_OUTDOOR_THREE = "three outdoor runs (2026-10-28, 10-30, 10-31)"
+_THREE_WITH_STEP_SPEED_LOSS = "three runs (2026-10-26, 10-30, 10-31)"
+
+
+_FIT_OBSERVED_FIELDS = {
+    ("record", 90): _details_match(
+        "performance_condition",
+        "directPerformanceCondition",
+        None,
+        _OUTDOOR_THREE,
+    ),
+    ("record", 137): _details_match(
+        "potential_stamina", "directPotentialStamina", "percent", _ALL_FOUR
+    ),
+    ("record", 138): _details_match(
+        "available_stamina", "directAvailableStamina", "percent", _ALL_FOUR
+    ),
+    ("record", 140): _details_match(
+        "grade_adjusted_speed",
+        "directGradeAdjustedSpeed",
+        "m/s",
+        _OUTDOOR_THREE,
+        scale=1000,
+    ),
+    ("record", 143): _details_match(
+        "body_battery", "directBodyBattery", "percent", _ALL_FOUR
+    ),
+    ("record", 146): _details_match(
+        "step_speed_loss",
+        "directStepSpeedLoss",
+        "m/s",
+        _THREE_WITH_STEP_SPEED_LOSS,
+        scale=10000,
+    ),
+    ("record", 147): _details_match(
+        "step_speed_loss_percent",
+        "directStepSpeedLossPercent",
+        "percent",
+        _THREE_WITH_STEP_SPEED_LOSS,
+        scale=100,
+    ),
+    ("record", 136): {
+        "name": "wrist_heart_rate",
+        "units": "bpm",
+        "confidence": "likely",
+        "evidence": (
+            "Equals heart_rate on every sample recorded without a strap "
+            "(3,121 on 2026-10-28, 597 on 10-26) and differs from strap "
+            "heart_rate while one is connected. Connect exposes no "
+            "wrist-only series."
         ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
     ("record", 144): {
         "name": "strap_heart_rate",
         "units": "bpm",
-        "confidence": "confirmed",
+        "confidence": "likely",
         "evidence": (
             "Equals heart_rate on 99% of samples with an HRM 600 (fw 5.2) "
-            "connected, and stops when the strap drops while wrist "
-            "heart_rate continues (2026-10-26)."
+            "connected, stops when the strap drops while wrist heart_rate "
+            "continues (2026-10-26), and is absent without a strap "
+            "(2026-10-28). Connect exposes no strap-only series."
         ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
@@ -252,58 +337,6 @@ _FIT_OBSERVED_FIELDS = {
         ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
-    ("device_info", 32): {
-        "name": "battery_level",
-        "units": "percent",
-        "confidence": "likely",
-        "evidence": (
-            "HRM 600 values fall across runs (71, 59, 58) and read 93 when "
-            "battery_status is new."
-        ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
-    },
-    ("record", 90): {
-        "name": "performance_condition",
-        "confidence": "confirmed",
-        "evidence": (
-            "Sample-for-sample identical distribution to Connect activity "
-            "details directPerformanceCondition on three activities "
-            "(2026-10-22, 10-28, 10-30); outdoor runs only."
-        ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
-    },
-    ("record", 136): {
-        "name": "wrist_heart_rate",
-        "units": "bpm",
-        "confidence": "likely",
-        "evidence": (
-            "Equals heart_rate on every sample without a strap (597 on "
-            "2026-10-26) and differs from strap heart_rate while one is "
-            "connected. Connect exposes no wrist-only series to confirm it."
-        ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
-    },
-    ("record", 137): {
-        "name": "potential_stamina",
-        "units": "percent",
-        "confidence": "confirmed",
-        "evidence": (
-            "Last sample equals Connect endPotentialStamina on six "
-            "activities, including 2026-10-28 (77) where available stamina "
-            "fell below it."
-        ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
-    },
-    ("record", 138): {
-        "name": "available_stamina",
-        "units": "percent",
-        "confidence": "confirmed",
-        "evidence": (
-            "Minimum equals Connect minAvailableStamina on six activities, "
-            "including 2026-10-28 (67, while potential stamina ended at 77)."
-        ),
-        "confirmed_on": [_FENIX_8_FW_24_13],
-    },
 }
 
 
@@ -314,10 +347,14 @@ def _fit_field_spec(field: Any, message: Any) -> Optional[Dict[str, Any]]:
     name = getattr(field, "name", None)
     if name and not str(name).startswith("unknown"):
         return None
-    key = (
+    return _fit_field_spec_for_key((
         str(getattr(message, "name", None) or "").lower(),
         _fit_field_definition_number(field),
-    )
+    ))
+
+
+def _fit_field_spec_for_key(key: tuple) -> Optional[Dict[str, Any]]:
+    """Return the definition for a (message name, definition number) key."""
     if key in _FIT_PROFILE_ADDITIONS:
         name, scale, units = _FIT_PROFILE_ADDITIONS[key]
         return {
@@ -870,16 +907,12 @@ def _summarize_fit_devices(
         summary["heart_rate"] = _summarize_fit_heart_rate(records)
     if notes:
         summary["notes"] = notes
-    field_aliases = {
-        f"{message_name}.{spec['name']}": _describe_fit_field_alias(
+    field_aliases = {}
+    for message_name, definition_number in (("device_info", 32), ("record", 144)):
+        spec = _fit_field_spec_for_key((message_name, definition_number))
+        field_aliases[f"{message_name}.{spec['name']}"] = _describe_fit_field_alias(
             spec, f"unknown_{definition_number}", creator
         )
-        for (message_name, definition_number), spec in _FIT_OBSERVED_FIELDS.items()
-        if (message_name, spec["name"]) in (
-            ("device_info", "battery_level"),
-            ("record", "strap_heart_rate"),
-        )
-    }
     summary["field_aliases"] = field_aliases
     return summary
 
@@ -2414,14 +2447,16 @@ def register_tools(app):
         fitparse's profile appear as unknown_<definition number>; record field
         108 is decoded as enhanced_respiration_rate (breaths/min).
 
-        Some undocumented Garmin fields are renamed from live comparison with
-        Garmin Connect: record strap_heart_rate (unknown_144, HR from a
-        chest strap only), body_battery (unknown_143), potential_stamina
-        (unknown_137), available_stamina (unknown_138), performance_condition
-        (unknown_90), and wrist_heart_rate (unknown_136, likely); session
-        begin/end_body_battery, begin/end_potential_stamina and
-        min_available_stamina; and device_info battery_level (likely). field_aliases lists each renamed or candidate
-        field in the response with its raw name, confidence (fit_sdk,
+        Newer FIT SDK fields are named too (device_info battery_level, session
+        respiration and grade-adjusted speed, and others). Some undocumented
+        Garmin fields are renamed from live comparison with Garmin Connect.
+        Record: performance_condition (unknown_90), potential_stamina (137),
+        available_stamina (138), grade_adjusted_speed (140), body_battery
+        (143), step_speed_loss (146), step_speed_loss_percent (147), and,
+        as likely, wrist_heart_rate (136) and strap_heart_rate (144, HR from
+        a chest strap only). Session: begin/end_body_battery,
+        begin/end_potential_stamina and min_available_stamina. field_aliases
+        lists each renamed or candidate field in the response with its raw name, confidence (fit_sdk,
         confirmed, likely, candidate), evidence, and the devices it was
         checked on; unconfirmed_firmware=true means the file came from other
         firmware, where Garmin may have moved the field. Candidates keep their
