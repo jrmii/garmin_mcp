@@ -586,6 +586,45 @@ async def test_get_activity_fit_messages_scales_observed_and_sdk_fields(
 
 
 @pytest.mark.asyncio
+async def test_get_activity_fit_messages_names_firstbeat_message_fields(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Message 140 raw values from 2026-10-28 decode to the Connect summary."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+    message = _make_generic_fit_message(
+        "unknown_140",
+        [
+            (3, "unknown_3", 5519413, None),
+            (4, "unknown_4", 31, None),
+            (7, "unknown_7", 763102, None),
+            (17, "unknown_17", -4, None),
+            (20, "unknown_20", 21, None),
+            (37, "unknown_37", 7630707, None),
+            (38, "unknown_38", 2111294, None),
+        ],
+    )
+
+    text = await _call_fit_messages(
+        app_with_activity_analysis,
+        [message],
+        {"message_types": ["unknown_140"], "output_format": "compact"},
+    )
+
+    data = json.loads(text)
+    fields = data["messages"][0]["fields"]
+    assert fields == {
+        "aerobic_training_load": pytest.approx(84.2196, abs=1e-4),
+        "aerobic_training_effect": 3.1,
+        "unknown_7": 763102,
+        "final_performance_condition": -4,
+        "anaerobic_training_effect": 2.1,
+        "training_load": pytest.approx(116.4353, abs=1e-4),
+        "anaerobic_training_load": pytest.approx(32.2158, abs=1e-4),
+    }
+    assert data["field_aliases"]["unknown_140.unknown_7"]["candidate_name"] == "vo2max"
+
+
+@pytest.mark.asyncio
 async def test_get_activity_fit_messages_flags_aliases_on_unconfirmed_firmware(
     app_with_activity_analysis, mock_garmin_client
 ):

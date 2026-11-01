@@ -295,6 +295,75 @@ _FIT_OBSERVED_FIELDS = {
         ),
         "confirmed_on": [_FENIX_8_FW_24_13],
     },
+    # Message 140 is not in the FIT SDK; a Garmin forum post describes it as
+    # Firstbeat post-activity metrics. Matched against the Connect summary
+    # on five activities (2026-10-22 to 10-31).
+    ("unknown_140", 37): {
+        "name": "training_load",
+        "scale": 65536,
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals Connect activityTrainingLoad on five activities "
+            "(2026-10-22 to 10-31, 84.7 to 220.5)."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("unknown_140", 3): {
+        "name": "aerobic_training_load",
+        "scale": 65536,
+        "confidence": "likely",
+        "evidence": (
+            "Adds with unknown_38 to training_load on five activities; "
+            "equals it when anaerobic training effect is 0. Connect has no "
+            "per-activity split to confirm it."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("unknown_140", 38): {
+        "name": "anaerobic_training_load",
+        "scale": 65536,
+        "confidence": "likely",
+        "evidence": (
+            "Adds with unknown_3 to training_load; nonzero (32.2) only on "
+            "2026-10-28, the one run with anaerobic training effect."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("unknown_140", 4): {
+        "name": "aerobic_training_effect",
+        "scale": 10,
+        "confidence": "confirmed",
+        "evidence": "Equals Connect trainingEffect on five activities.",
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("unknown_140", 17): {
+        "name": "final_performance_condition",
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals the last record performance_condition on four outdoor "
+            "runs; 0 on a treadmill run without one."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("unknown_140", 20): {
+        "name": "anaerobic_training_effect",
+        "scale": 10,
+        "confidence": "confirmed",
+        "evidence": (
+            "Equals Connect anaerobicTrainingEffect on five activities, "
+            "including 2.1 on 2026-10-28."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
+    ("unknown_140", 7): {
+        "name": "vo2max",
+        "confidence": "candidate",
+        "evidence": (
+            "Raw x 3.5 / 65536 tracks Connect vo2MaxPreciseValue (40.2 to "
+            "40.8) but runs 0.25 to 0.35 low on four runs."
+        ),
+        "confirmed_on": [_FENIX_8_FW_24_13],
+    },
     ("session", 205): {
         "name": "begin_potential_stamina",
         "units": "percent",
@@ -2455,7 +2524,11 @@ def register_tools(app):
         (143), step_speed_loss (146), step_speed_loss_percent (147), and,
         as likely, wrist_heart_rate (136) and strap_heart_rate (144, HR from
         a chest strap only). Session: begin/end_body_battery,
-        begin/end_potential_stamina and min_available_stamina. field_aliases
+        begin/end_potential_stamina and min_available_stamina. Message
+        unknown_140 (Firstbeat metrics): training_load, its likely
+        aerobic/anaerobic_training_load split, aerobic_training_effect,
+        anaerobic_training_effect, and final_performance_condition.
+        field_aliases
         lists each renamed or candidate field in the response with its raw name, confidence (fit_sdk,
         confirmed, likely, candidate), evidence, and the devices it was
         checked on; unconfirmed_firmware=true means the file came from other
